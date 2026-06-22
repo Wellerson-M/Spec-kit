@@ -1,0 +1,334 @@
+openapi: 3.0.3
+info:
+  title: SIGOF API
+  description: >
+    API REST do SIGOF — Sistema Inteligente de Gestão de Ocorrências de Frete.
+    Todos os endpoints (exceto /auth/login e /health) exigem JWT Bearer. O escopo de dados é
+    sempre restrito à empresa (tenant) derivada do token; empresa_id nunca é aceito do cliente.
+  version: 1.0.0
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+tags:
+  - name: Auth
+  - name: Solicitacoes
+  - name: Mensagens
+  - name: Anexos
+  - name: Relatorios
+  - name: Ops
+paths:
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Autentica usuário interno e retorna JWT
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, senha]
+              properties:
+                email: { type: string, format: email }
+                senha: { type: string, format: password }
+      responses:
+        "200":
+          description: Token emitido
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+                  usuario: { $ref: "#/components/schemas/Usuario" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /solicitacoes:
+    get:
+      tags: [Solicitacoes]
+      summary: Lista solicitações da empresa com filtros (RF04)
+      parameters:
+        - { in: query, name: status, schema: { $ref: "#/components/schemas/Status" } }
+        - { in: query, name: prioridade, schema: { $ref: "#/components/schemas/Prioridade" } }
+        - { in: query, name: minhaFila, schema: { type: boolean } }
+        - { in: query, name: protocolo, schema: { type: string } }
+      responses:
+        "200":
+          description: Lista paginada
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Solicitacao" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Solicitacoes]
+      summary: Cria solicitação e gera protocolo único (RF01, RF03, RF09)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NovaSolicitacao" }
+      responses:
+        "201":
+          description: Criada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Solicitacao" }
+        "409":
+          description: Possível duplicidade de CTe/NF em 7 dias (RF09)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  codigo: { type: string, example: DUPLICIDADE_POSSIVEL }
+                  duplicada_de: { type: string, description: protocolo existente }
+                  acao: { type: string, enum: [vincular, prosseguir] }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /solicitacoes/{id}:
+    get:
+      tags: [Solicitacoes]
+      summary: Detalhe da solicitação (dados, anexos, histórico, mensagens)
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SolicitacaoDetalhe" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /solicitacoes/{id}/assumir:
+    post:
+      tags: [Solicitacoes]
+      summary: Analista assume a solicitação (RF05) — novo → em_andamento
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      responses:
+        "200": { description: Assumida, content: { application/json: { schema: { $ref: "#/components/schemas/Solicitacao" } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /solicitacoes/{id}/status:
+    patch:
+      tags: [Solicitacoes]
+      summary: Atualiza status seguindo transições válidas (RF06, FR-014, FR-015)
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { $ref: "#/components/schemas/Status" }
+                descricao_acao: { type: string, description: obrigatório ao resolver }
+      responses:
+        "200": { description: Atualizada, content: { application/json: { schema: { $ref: "#/components/schemas/Solicitacao" } } } }
+        "409": { description: Transição inválida }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /solicitacoes/{id}/prioridade:
+    patch:
+      tags: [Solicitacoes]
+      summary: Altera prioridade — apenas supervisor (RF08)
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prioridade]
+              properties:
+                prioridade: { $ref: "#/components/schemas/Prioridade" }
+      responses:
+        "200": { description: Atualizada }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /solicitacoes/{id}/responsavel:
+    patch:
+      tags: [Solicitacoes]
+      summary: Reatribui responsável — apenas supervisor (RF05/US3)
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [responsavel_id]
+              properties:
+                responsavel_id: { type: string, format: uuid }
+      responses:
+        "200": { description: Reatribuída }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /solicitacoes/{id}/mensagens:
+    get:
+      tags: [Mensagens]
+      summary: Lista mensagens/chat da solicitação (RF07)
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Mensagem" } } } } }
+    post:
+      tags: [Mensagens]
+      summary: Adiciona mensagem (RF07)
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [conteudo]
+              properties:
+                conteudo: { type: string }
+                interna: { type: boolean, default: false }
+      responses:
+        "201": { description: Criada }
+
+  /solicitacoes/{id}/anexos:
+    post:
+      tags: [Anexos]
+      summary: Faz upload de anexo (RF02 — máx 10 por solicitação, 5MB cada)
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                arquivo: { type: string, format: binary }
+      responses:
+        "201": { description: Anexado }
+        "413": { description: Arquivo acima de 5MB ou limite de 10 anexos excedido }
+
+  /relatorios/kpis:
+    get:
+      tags: [Relatorios]
+      summary: KPIs do dashboard gerencial — apenas supervisor/admin (RF11)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tempo_medio_resolucao_horas: { type: number }
+                  por_status: { type: object, additionalProperties: { type: integer } }
+                  tempo_medio_por_analista: { type: array, items: { type: object } }
+                  taxa_duplicidade: { type: number }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /health:
+    get:
+      tags: [Ops]
+      summary: Health check (RNF04)
+      security: []
+      responses:
+        "200": { description: OK }
+
+  /metrics:
+    get:
+      tags: [Ops]
+      summary: Métricas Prometheus
+      security: []
+      responses:
+        "200": { description: Métricas no formato Prometheus }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    Id:
+      in: path
+      name: id
+      required: true
+      schema: { type: string, format: uuid }
+  responses:
+    BadRequest: { description: Requisição inválida }
+    Unauthorized: { description: Token ausente ou inválido }
+    Forbidden: { description: Perfil sem permissão ou acesso cross-tenant negado }
+    NotFound: { description: Recurso não encontrado na empresa do usuário }
+  schemas:
+    Status:
+      type: string
+      enum: [novo, em_andamento, aguardando_doc, escalado, resolvido, cancelado]
+    Prioridade:
+      type: string
+      enum: [baixa, media, alta, urgente]
+    Tipo:
+      type: string
+      enum: [reversao, troca_pagador, ajuste_fiscal, outro]
+    Perfil:
+      type: string
+      enum: [solicitante, analista, supervisor, admin]
+    Usuario:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        nome: { type: string }
+        email: { type: string, format: email }
+        perfil: { $ref: "#/components/schemas/Perfil" }
+        area: { type: string }
+    NovaSolicitacao:
+      type: object
+      required: [tipo, cte, descricao]
+      properties:
+        tipo: { $ref: "#/components/schemas/Tipo" }
+        cte: { type: string }
+        nf: { type: string }
+        pagador_correto: { type: string }
+        descricao: { type: string }
+        ignorar_duplicidade: { type: boolean, default: false }
+    Solicitacao:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        protocolo: { type: string, example: SOL-2026-06-0001 }
+        tipo: { $ref: "#/components/schemas/Tipo" }
+        cte: { type: string }
+        nf: { type: string }
+        pagador_correto: { type: string }
+        descricao: { type: string }
+        status: { $ref: "#/components/schemas/Status" }
+        prioridade: { $ref: "#/components/schemas/Prioridade" }
+        solicitante_id: { type: string, format: uuid }
+        responsavel_id: { type: string, format: uuid, nullable: true }
+        sla_limite_em: { type: string, format: date-time }
+        criado_em: { type: string, format: date-time }
+        resolvido_em: { type: string, format: date-time, nullable: true }
+    Mensagem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        autor_id: { type: string, format: uuid }
+        conteudo: { type: string }
+        interna: { type: boolean }
+        criado_em: { type: string, format: date-time }
+    StatusHistorico:
+      type: object
+      properties:
+        status_anterior: { $ref: "#/components/schemas/Status" }
+        status_novo: { $ref: "#/components/schemas/Status" }
+        autor_id: { type: string, format: uuid }
+        criado_em: { type: string, format: date-time }
+    SolicitacaoDetalhe:
+      allOf:
+        - $ref: "#/components/schemas/Solicitacao"
+        - type: object
+          properties:
+            mensagens: { type: array, items: { $ref: "#/components/schemas/Mensagem" } }
+            historico: { type: array, items: { $ref: "#/components/schemas/StatusHistorico" } }
+            anexos: { type: array, items: { type: object } }

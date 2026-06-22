@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: sigof
+      POSTGRES_PASSWORD: sigof
+      POSTGRES_DB: sigof
+    ports:
+      - "5432:5432"
+    volumes:
+      - sigof_pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio12345
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - sigof_minio:/data
+
+volumes:
+  sigof_pgdata:
+  sigof_minio:

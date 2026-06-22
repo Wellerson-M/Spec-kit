@@ -1,0 +1,159 @@
+// Prisma schema do SIGOF — ver specs/001-gestao-ocorrencias-frete/data-model.md
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Perfil {
+  solicitante
+  analista
+  supervisor
+  admin
+}
+
+enum Area {
+  financeiro
+  comercial
+  operacional
+}
+
+enum TipoOcorrencia {
+  reversao
+  troca_pagador
+  ajuste_fiscal
+  outro
+}
+
+enum Status {
+  novo
+  em_andamento
+  aguardando_doc
+  escalado
+  resolvido
+  cancelado
+}
+
+enum Prioridade {
+  baixa
+  media
+  alta
+  urgente
+}
+
+model Empresa {
+  id            String        @id @default(uuid())
+  razaoSocial   String        @map("razao_social")
+  cnpj          String        @unique
+  ativa         Boolean       @default(true)
+  criadoEm      DateTime      @default(now()) @map("criado_em")
+  usuarios      Usuario[]
+  solicitacoes  Solicitacao[]
+
+  @@map("empresa")
+}
+
+model Usuario {
+  id                  String         @id @default(uuid())
+  empresaId           String         @map("empresa_id")
+  empresa             Empresa        @relation(fields: [empresaId], references: [id])
+  nome                String
+  email               String
+  senhaHash           String         @map("senha_hash")
+  perfil              Perfil
+  area                Area
+  criadoEm            DateTime       @default(now()) @map("criado_em")
+  solicitacoesAbertas Solicitacao[]  @relation("solicitante")
+  solicitacoesResp    Solicitacao[]  @relation("responsavel")
+  mensagens           Mensagem[]
+  notificacoes        Notificacao[]
+  historicos          StatusHistorico[]
+
+  @@unique([empresaId, email])
+  @@map("usuario")
+}
+
+model Solicitacao {
+  id                  String           @id @default(uuid())
+  empresaId           String           @map("empresa_id")
+  empresa             Empresa          @relation(fields: [empresaId], references: [id])
+  protocolo           String           @unique
+  solicitanteId       String           @map("solicitante_id")
+  solicitante         Usuario          @relation("solicitante", fields: [solicitanteId], references: [id])
+  responsavelId       String?          @map("responsavel_id")
+  responsavel         Usuario?         @relation("responsavel", fields: [responsavelId], references: [id])
+  tipo                TipoOcorrencia
+  cte                 String
+  nf                  String?
+  pagadorCorreto      String?          @map("pagador_correto")
+  descricao           String
+  status              Status           @default(novo)
+  prioridade          Prioridade       @default(media)
+  slaLimiteEm         DateTime?        @map("sla_limite_em")
+  slaPausadoEm        DateTime?        @map("sla_pausado_em")
+  slaSegundosPausados Int              @default(0) @map("sla_segundos_pausados")
+  criadoEm            DateTime         @default(now()) @map("criado_em")
+  resolvidoEm         DateTime?        @map("resolvido_em")
+  mensagens           Mensagem[]
+  anexos              Anexo[]
+  historicos          StatusHistorico[]
+  notificacoes        Notificacao[]
+
+  @@index([empresaId, status, prioridade])
+  @@index([empresaId, cte, nf, criadoEm])
+  @@map("solicitacao")
+}
+
+model Mensagem {
+  id            String      @id @default(uuid())
+  solicitacaoId String      @map("solicitacao_id")
+  solicitacao   Solicitacao @relation(fields: [solicitacaoId], references: [id])
+  autorId       String      @map("autor_id")
+  autor         Usuario     @relation(fields: [autorId], references: [id])
+  conteudo      String
+  interna       Boolean     @default(false)
+  criadoEm      DateTime    @default(now()) @map("criado_em")
+
+  @@map("mensagem")
+}
+
+model Anexo {
+  id            String      @id @default(uuid())
+  solicitacaoId String      @map("solicitacao_id")
+  solicitacao   Solicitacao @relation(fields: [solicitacaoId], references: [id])
+  nomeArquivo   String      @map("nome_arquivo")
+  urlStorage    String      @map("url_storage")
+  tamanhoBytes  Int         @map("tamanho_bytes")
+  criadoEm      DateTime    @default(now()) @map("criado_em")
+
+  @@map("anexo")
+}
+
+model StatusHistorico {
+  id             String      @id @default(uuid())
+  solicitacaoId  String      @map("solicitacao_id")
+  solicitacao    Solicitacao @relation(fields: [solicitacaoId], references: [id])
+  autorId        String      @map("autor_id")
+  autor          Usuario     @relation(fields: [autorId], references: [id])
+  statusAnterior Status?     @map("status_anterior")
+  statusNovo     Status      @map("status_novo")
+  criadoEm       DateTime    @default(now()) @map("criado_em")
+
+  @@map("status_historico")
+}
+
+model Notificacao {
+  id            String      @id @default(uuid())
+  usuarioId     String      @map("usuario_id")
+  usuario       Usuario     @relation(fields: [usuarioId], references: [id])
+  solicitacaoId String      @map("solicitacao_id")
+  solicitacao   Solicitacao @relation(fields: [solicitacaoId], references: [id])
+  mensagem      String
+  lida          Boolean     @default(false)
+  criadoEm      DateTime    @default(now()) @map("criado_em")
+
+  @@map("notificacao")
+}

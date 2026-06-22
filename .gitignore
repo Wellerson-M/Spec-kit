@@ -1,0 +1,25 @@
+# Dependências
+node_modules/
+
+# Build
+dist/
+build/
+.next/
+
+# Ambiente / segredos
+.env
+.env.local
+.env.*.local
+
+# Logs e cobertura
+*.log
+coverage/
+
+# Prisma
+backend/prisma/*.db
+
+# SO / editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
